@@ -7,6 +7,7 @@
 #include "otas_macro.h"
 #include "otas_reflection.h"
 #include "otas_check.h"
+#include "otas_serializable.h"
 #include <iostream>
 namespace otas_serializer {
 
@@ -382,7 +383,7 @@ template <class T, class U, class Buffer>
 struct deserialize_helper<std::pair<T, U>, Buffer> {
     static auto deserialize_template(const Buffer &s, std::pair<T, U> &t, std::size_t &offset) {
         deserialize_helper<T, Buffer>::deserialize_template(s, t.first, offset);
-        deserialize_helper<T, Buffer>::deserialize_template(s, t.second, offset);
+        deserialize_helper<U, Buffer>::deserialize_template(s, t.second, offset);
         return ;
     }
 };
