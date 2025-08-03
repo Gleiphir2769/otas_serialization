@@ -30,6 +30,7 @@ int main() {
     auto start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < 1000000; i++) {
         auto s = otas_serializer::serialize<otas_serializer::otas_buffer>(monster0);
+        Monster p2 = otas_serializer::deserialize<Monster>(s);
         delete[] s.data_;
     }
     auto end = std::chrono::high_resolution_clock::now();

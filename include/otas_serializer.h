@@ -10,31 +10,63 @@
 #include <iostream>
 namespace otas_serializer {
 
-template <class T>
-concept map_container = requires(T container) {
-    typename T::key_type;
-    typename T::mapped_type;
-    container.size();
-    container.begin();
-    container.end();
-};
+// C++17 compatible type traits instead of concepts
+template <class T, class = void>
+struct is_map_container : std::false_type {};
 
 template <class T>
-concept set_container = requires(T container) {
-    typename T::key_type;
-    typename T::value_type;
-    container.size();
-    container.begin();
-    container.end();
-};
+struct is_map_container<T, std::void_t<
+    typename T::key_type,
+    typename T::mapped_type,
+    decltype(std::declval<T>().size()),
+    decltype(std::declval<T>().begin()),
+    decltype(std::declval<T>().end())
+>> : std::true_type {};
 
 template <class T>
-concept list_container = requires(T container) {
-    typename T::value_type;
-    container.size();
-    container.begin();
-    container.end();
-};
+constexpr bool map_container = is_map_container<T>::value;
+
+template <class T, class = void>
+struct is_set_container : std::false_type {};
+
+template <class T>
+struct is_set_container<T, std::void_t<
+    typename T::key_type,
+    typename T::value_type,
+    decltype(std::declval<T>().size()),
+    decltype(std::declval<T>().begin()),
+    decltype(std::declval<T>().end())
+>> : std::true_type {};
+
+template <class T>
+constexpr bool set_container = is_set_container<T>::value;
+
+template <class T, class = void>
+struct is_list_container : std::false_type {};
+
+template <class T>
+struct is_list_container<T, std::void_t<
+    typename T::value_type,
+    decltype(std::declval<T>().size()),
+    decltype(std::declval<T>().begin()),
+    decltype(std::declval<T>().end())
+>> : std::true_type {};
+
+template <class T>
+constexpr bool list_container = is_list_container<T>::value;
+
+// Forward declarations for C++17 compatibility
+template <class T, class Buffer, bool copy, class Members, std::size_t... index>
+constexpr void serialize_members_impl(const Members& members, Buffer& s, std::size_t& offset, std::index_sequence<index...>);
+
+template <class T, class Buffer, class Members, std::size_t... index>
+constexpr void deserialize_members_impl(const Buffer& s, Members& members, std::size_t& offset, std::index_sequence<index...>);
+
+template <class Buffer, bool copy, class Tuple, std::size_t... index>
+constexpr void serialize_tuple_impl(const Tuple& t, Buffer& s, std::size_t& offset, std::index_sequence<index...>);
+
+template <class Buffer, class Tuple, std::size_t... index>
+constexpr void deserialize_tuple_impl(const Buffer& s, Tuple& t, std::size_t& offset, std::index_sequence<index...>);
 
 template <class T, class Buffer, bool copy>
 struct serialize_helper {
@@ -76,9 +108,7 @@ struct serialize_helper {
         else {
             constexpr auto count = get_member_count<T>();
             auto members = member_tuple_helper<T, count>::tuple_view(t);
-            [&]<std::size_t... index>(std::index_sequence<index...>) {
-                ((serialize_helper<remove_cvref_t<std::tuple_element_t<index, decltype(members)>>, Buffer, copy>::serialize_template(std::get<index>(members), s, offset)), ...);
-            } (std::make_index_sequence<count>{});
+            serialize_members_impl<T, Buffer, copy>(members, s, offset, std::make_index_sequence<count>{});
         }
         return ;
     }
@@ -121,13 +151,33 @@ struct deserialize_helper {
         } else {
             constexpr auto count = get_member_count<T>();
             auto members = member_tuple_helper<T, count>::tuple_view(t);
-            [&]<std::size_t... index>(std::index_sequence<index...>) {
-                ((deserialize_helper<remove_cvref_t<std::tuple_element_t<index, decltype(members)>>, Buffer>::deserialize_template(s, std::get<index>(members), offset)), ...);
-            } (std::make_index_sequence<count>{});
+            deserialize_members_impl<T, Buffer>(s, members, offset, std::make_index_sequence<count>{});
         }
         return ;
     }
 };
+
+// C++17 compatible helper functions for aggregate types
+template <class T, class Buffer, bool copy, class Members, std::size_t... index>
+constexpr void serialize_members_impl(const Members& members, Buffer& s, std::size_t& offset, std::index_sequence<index...>) {
+    ((serialize_helper<remove_cvref_t<std::tuple_element_t<index, Members>>, Buffer, copy>::serialize_template(std::get<index>(members), s, offset)), ...);
+}
+
+template <class T, class Buffer, class Members, std::size_t... index>
+constexpr void deserialize_members_impl(const Buffer& s, Members& members, std::size_t& offset, std::index_sequence<index...>) {
+    ((deserialize_helper<remove_cvref_t<std::tuple_element_t<index, Members>>, Buffer>::deserialize_template(s, std::get<index>(members), offset)), ...);
+}
+
+// C++17 compatible helper functions for std::tuple
+template <class Buffer, bool copy, class Tuple, std::size_t... index>
+constexpr void serialize_tuple_impl(const Tuple& t, Buffer& s, std::size_t& offset, std::index_sequence<index...>) {
+    ((serialize_helper<remove_cvref_t<std::tuple_element_t<index, Tuple>>, Buffer, copy>::serialize_template(std::get<index>(t), s, offset)), ...);
+}
+
+template <class Buffer, class Tuple, std::size_t... index>
+constexpr void deserialize_tuple_impl(const Buffer& s, Tuple& t, std::size_t& offset, std::index_sequence<index...>) {
+    ((deserialize_helper<remove_cvref_t<std::tuple_element_t<index, Tuple>>, Buffer>::deserialize_template(s, std::get<index>(t), offset)), ...);
+}
 
 
 template <class Buffer, bool copy>
@@ -279,7 +329,7 @@ template <class T, std::size_t N, class Buffer>
 struct deserialize_helper<std::array<T, N>, Buffer> {
     static auto deserialize_template(const Buffer &s, std::array<T, N> &t, std::size_t &offset) {
         if constexpr (std::is_trivially_copyable_v<T>) {
-            memcpy(t.data(), sizeof(T) * N);
+            memcpy(t.data(), &s[offset], sizeof(T) * N);
             offset += sizeof(T) * N;
         } else {
             for (unsigned int index = 0; index < N; index++) {
@@ -407,18 +457,14 @@ struct deserialize_helper<std::forward_list<T>, Buffer> {
 template <class ...Args, class Buffer, bool copy>
 struct serialize_helper<std::tuple<Args...>, Buffer, copy> {
     static auto serialize_template(const std::tuple<Args...> &t, Buffer &s, std::size_t &offset) {
-        [&]<std::size_t... index>(std::index_sequence<index...>) {
-            ((serialize_helper<remove_cvref_t<std::tuple_element_t<index, std::tuple<Args...>>>, Buffer, copy>::serialize_template(std::get<index>(t), s, offset)), ...);
-        } (std::make_index_sequence<sizeof...(Args)>{});
+        serialize_tuple_impl<Buffer, copy>(t, s, offset, std::make_index_sequence<sizeof...(Args)>{});
         return ;
     }
 };
 template <class ...Args, class Buffer>
 struct deserialize_helper<std::tuple<Args...>, Buffer> {
     static auto deserialize_template(const Buffer &s, std::tuple<Args...> &t, std::size_t &offset) {
-        [&]<std::size_t... index>(std::index_sequence<index...>) {
-            ((deserialize_helper<remove_cvref_t<std::tuple_element_t<index, std::tuple<Args...>>>, Buffer>::deserialize_template(s, std::get<index>(t), offset)), ...);
-        } (std::make_index_sequence<sizeof...(Args)>{});
+        deserialize_tuple_impl<Buffer>(s, t, offset, std::make_index_sequence<sizeof...(Args)>{});
         return ;
     }
 };

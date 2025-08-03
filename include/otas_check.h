@@ -21,6 +21,16 @@ struct check_code_helper {
     inline static constexpr unsigned int value = check_code_struct<T>::check_code_template();
 };
 
+// C++17 compatible helper function for check code calculation
+template <class T, std::size_t... index>
+constexpr void calculate_member_codes_impl(unsigned int& code, std::index_sequence<index...>) {
+    constexpr auto count = sizeof...(index);
+    if constexpr (count != 0) {
+        auto members = member_tuple_helper<T, count>::static_tuple_view();
+        ((code *= 998244353, code += check_code_helper<std::remove_pointer_t<remove_cvref_t<std::tuple_element_t<index, decltype(members)>>>>::value), ...);
+    }
+}
+
 template <class T>
 struct check_code_struct {
     constexpr static unsigned int check_code_template() {
@@ -28,10 +38,7 @@ struct check_code_struct {
         if constexpr (!std::is_arithmetic_v<T> && !std::is_same_v<std::string, T> && !std::is_same_v<std::wstring, T>) {
             constexpr auto count = get_member_count<T>();
             if constexpr (count != 0) {
-                auto members = member_tuple_helper<T, count>::static_tuple_view();
-                [&]<std::size_t... index>(std::index_sequence<index...>) {
-                    ((code *= 998244353, code += check_code_helper<std::remove_pointer_t<remove_cvref_t<std::tuple_element_t<index, decltype(members)>>>>::value), ...);
-                } (std::make_index_sequence<count>{});
+                calculate_member_codes_impl<T>(code, std::make_index_sequence<count>{});
             }
         }
         return code;
@@ -98,24 +105,32 @@ struct check_code_struct<std::array<T, N>> {
     }
 };
 
+// C++17 compatible helper function for tuple check code
+template <class... Args, std::size_t... index>
+constexpr void calculate_tuple_codes_impl(unsigned int& code, std::index_sequence<index...>) {
+    ((code *= 998244353, code += check_code_helper<remove_cvref_t<std::tuple_element_t<index, std::tuple<Args...>>>>::value), ...);
+}
+
 template <class ...Args>
 struct check_code_struct<std::tuple<Args...>> {
     constexpr static unsigned int check_code_template() {
         unsigned int code = code_generate(type_name<std::tuple<Args...>>());
-        [&]<std::size_t... index>(std::index_sequence<index...>) {
-            ((code *= 998244353, code += check_code_helper<remove_cvref_t<Args>>::value), ...);
-        } (std::make_index_sequence<sizeof...(Args)>{});
+        calculate_tuple_codes_impl<Args...>(code, std::make_index_sequence<sizeof...(Args)>{});
         return code;
     }
 };
+
+// C++17 compatible helper function for variant check code
+template <class... Args, std::size_t... index>
+constexpr void calculate_variant_codes_impl(unsigned int& code, std::index_sequence<index...>) {
+    ((code *= 998244353, code += check_code_helper<remove_cvref_t<std::tuple_element_t<index, std::tuple<Args...>>>>::value), ...);
+}
 
 template <class ...Args>
 struct check_code_struct<std::variant<Args...>> {
     constexpr static unsigned int check_code_template() {
         unsigned int code = code_generate(type_name<std::variant<Args...>>);
-        [&]<std::size_t... index>(std::index_sequence<index...>) {
-            ((code *= 998244353, code += check_code_helper<remove_cvref_t<Args>>::value), ...);
-        } (std::make_index_sequence<sizeof...(Args)>{});
+        calculate_variant_codes_impl<Args...>(code, std::make_index_sequence<sizeof...(Args)>{});
         return code;
     }
 };

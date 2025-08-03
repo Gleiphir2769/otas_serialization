@@ -112,15 +112,19 @@ inline constexpr std::string_view member_name() {
     return function_name.substr(l + 2, r - l - 2);
 }
 
+// C++17 compatible helper function
+template <class T, std::size_t... index>
+constexpr void fill_member_names_impl(std::array<std::string_view, sizeof...(index)>& arr, std::index_sequence<index...>) {
+    constexpr auto members = member_tuple_helper<T, sizeof...(index)>::static_tuple_view();
+    ((arr[index] = member_name<std::get<index>(members)>()), ...);
+}
+
 template <class T>
 struct member_name_helper {
     inline constexpr static auto tuple_name() {
         constexpr auto count = get_member_count<T>();
-        constexpr auto members = member_tuple_helper<T, count>::static_tuple_view_ptr();
         std::array<std::string_view, count> arr;
-        [&]<std::size_t... index>(std::index_sequence<index...>) {
-            ((arr[index] = member_name<std::get<index>(members)>()), ...);
-        } (std::make_index_sequence<count>{});
+        fill_member_names_impl<T>(arr, std::make_index_sequence<count>{});
         return arr;
     }
 };
